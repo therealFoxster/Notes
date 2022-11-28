@@ -45,48 +45,6 @@ class TableViewController: UITableViewController, NoteViewControllerDelegate {
         reloadData()
     }
     
-    @objc func createNote() {
-        if let noteViewController = storyboard?.instantiateViewController(withIdentifier: "Note") as? NoteViewController {
-            noteViewController.delegate = self
-            navigationController?.pushViewController(noteViewController, animated: true)
-            selectedRow = nil
-            generateNoteFileName()
-        }
-    }
-    
-    func generateNoteFileName() {
-        currentNoteFilename = "\(UUID().uuidString).txt" // Will only be writen to and added to noteFilenames by saveNote() if file has text.
-    }
-    
-    func saveNote(_ text: String) {
-        if selectedRow != nil { // Updating existing note (already in table).
-            noteFilenames.remove(at: selectedRow!) // Remove note so if it's added again (i.e. if there's text), it will be at the top.
-        }
-        
-        let noteFileURL = notesDirectoryURL.appending(path: "\(currentNoteFilename)")
-        
-        if text.isEmpty {
-            // Delete note.
-            do {
-                try FileManager.default.removeItem(at: noteFileURL)
-            } catch let error {
-                print("Unable to remove note from disk: \(error.localizedDescription)")
-            }
-        } else {
-            // Write note & add to noteFilenames.
-            do {
-                // Write text to note file.
-                try text.write(to: noteFileURL, atomically: true, encoding: .utf8)
-            } catch let error {
-                print("Unable to write note to disk: \(error.localizedDescription)")
-            }
-            
-            noteFilenames.insert(currentNoteFilename, at: 0)
-        }
-        
-        reloadData()
-    }
-    
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return noteFilenames.count
     }
@@ -106,7 +64,7 @@ class TableViewController: UITableViewController, NoteViewControllerDelegate {
             }
         }
 
-        if let modificationDate = getModificationDateForFile(noteFilename) {
+        if let modificationDate = getModificationDateForNoteFile(noteFilename) {
             let dateFormatter = DateFormatter(),
                 timeFormatter = DateFormatter(),
                 dayOfWeekFormatter = DateFormatter()
@@ -145,10 +103,36 @@ class TableViewController: UITableViewController, NoteViewControllerDelegate {
         }
     }
     
+    // Swipe to delete (thanks to @TwoStraws)
+    override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
+        if editingStyle == .delete {
+            let confirmAlert = UIAlertController(title: "Delete this note?", message: "This action is irreversible.", preferredStyle: .alert)
+            confirmAlert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            confirmAlert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+                self?.deleteNoteFile(self?.noteFilenames[indexPath.row])
+                self?.noteFilenames.remove(at: indexPath.row)
+                self?.tableView.deleteRows(at: [indexPath], with: .fade)
+                self?.reloadData()
+            })
+            present(confirmAlert, animated: true)
+        } else if editingStyle == .insert {
+            // Create a new instance of the appropriate class, insert it into the array, and add a new row to the table view.
+        }
+    }
+    
     // Thanks to @TwoStraws
     func getDocumentsDirectory() -> URL {
         let paths = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
         return paths[0]
+    }
+    
+    @objc func createNote() {
+        if let noteViewController = storyboard?.instantiateViewController(withIdentifier: "Note") as? NoteViewController {
+            noteViewController.delegate = self
+            navigationController?.pushViewController(noteViewController, animated: true)
+            selectedRow = nil
+            generateNoteFileName()
+        }
     }
     
     func readNoteFile(_ filename: String) -> String {
@@ -156,13 +140,24 @@ class TableViewController: UITableViewController, NoteViewControllerDelegate {
         return (try? String(contentsOf: fileURL)) ?? ""
     }
     
-    func getModificationDateForFile(_ filename: String) -> Date? {
+    func deleteNoteFile(_ filename: String?) {
+        if let filename = filename {
+            let noteFileURL = notesDirectoryURL.appending(path: "\(filename)")
+            do {
+                try FileManager.default.removeItem(at: noteFileURL)
+            } catch let error {
+                print("Unable to remove note from disk: \(error.localizedDescription)")
+            }
+        }
+    }
+    
+    func getModificationDateForNoteFile(_ filename: String) -> Date? {
         var modificationDate: Date?
         
         do {
-            let fileURL = notesDirectoryURL.appending(path: filename),
-                fileAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path())
-            modificationDate = fileAttributes[FileAttributeKey.modificationDate] as? Date
+            let noteFileURL = notesDirectoryURL.appending(path: filename),
+                noteFileAttributes = try FileManager.default.attributesOfItem(atPath: noteFileURL.path())
+            modificationDate = noteFileAttributes[FileAttributeKey.modificationDate] as? Date
         } catch let error {
             print("Unable to get file modification date: \(error.localizedDescription)")
         }
@@ -198,19 +193,34 @@ class TableViewController: UITableViewController, NoteViewControllerDelegate {
         noteCountLabel.text = "\(count) Note\(count == 1 ? "" : "s")"
     }
     
-    // Swipe to delete (thanks to @TwoStraws)
-    override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
-        if editingStyle == .delete {
-            let confirmAlert = UIAlertController(title: "Delete this note?", message: "This action is irreversible.", preferredStyle: .alert)
-            confirmAlert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-            confirmAlert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
-                self?.noteFilenames.remove(at: indexPath.row)
-                self?.tableView.deleteRows(at: [indexPath], with: .fade)
-            })
-            present(confirmAlert, animated: true)
-        } else if editingStyle == .insert {
-            // Create a new instance of the appropriate class, insert it into the array, and add a new row to the table view.
+    // MARK: NoteViewControllerDelegate functions
+    
+    func generateNoteFileName() {
+        currentNoteFilename = "\(UUID().uuidString).txt" // Will only be writen to and added to noteFilenames by saveNote() if file has text.
+    }
+    
+    func saveNote(_ text: String) {
+        if selectedRow != nil { // Updating existing note (already in table).
+            noteFilenames.remove(at: selectedRow!) // Remove note so if it's added again (i.e. if there's text), it will be at the top.
         }
+        
+        if text.isEmpty {
+            // Delete note.
+            deleteNoteFile(currentNoteFilename)
+        } else {
+            // Write note & add to noteFilenames.
+            let noteFileURL = notesDirectoryURL.appending(path: "\(currentNoteFilename)")
+            do {
+                // Write text to note file.
+                try text.write(to: noteFileURL, atomically: true, encoding: .utf8)
+            } catch let error {
+                print("Unable to write note to disk: \(error.localizedDescription)")
+            }
+            
+            noteFilenames.insert(currentNoteFilename, at: 0)
+        }
+        
+        reloadData()
     }
     
 }
