@@ -1,5 +1,5 @@
 #  Notes
-100 Days of Swift – Milestone Project 8 (UIKit): Simple note app
+100 Days of Swift – Milestone Project 8 (UIKit): Simple notes app
 
 ## Screenshots
 
